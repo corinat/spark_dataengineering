@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "spark_data_transformations"
+version = "0.2.0"
+description = "data transformations with pyspark"
+authors = ["Corina Tudorache <corina_ww@yahoo.com>"]
+license = "Apache-License-2.0"
+packages = [{include = "data_transformations"}]
+
+[tool.poetry.dependencies]
+numpy = "^2.2.6"
+pandas = "^2.3.0"
+pyarrow = "^24.0.0"
+# This is pinned to stay in sync with the version
+# That gets downloaded in `Dockerfile`
+pyspark = "4.1.1"
+apache-sedona = "^1.9.0"
+rasterio = "^1.4.0"
+python = "~3.11"
+
+[tool.poetry.group.dev.dependencies]
+pylint = "^4.0.5"
+pytest = "^9.0.3"
+mypy = "^1.20.2"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
