@@ -1,50 +1,21 @@
-# Data transformations with Python
+# Geospatial Data Lake with PySpark and Apache Sedona
 
 This is a collection of _Python_ jobs that extract, transform and load data using _PySpark_ and _Apache Sedona_ for geospatial processing. Jobs are designed to run on a _Spark_ cluster (via `spark-submit`).
 
+The pipelines follow a **data lake medallion architecture**: raw source files (CSV, GeoTIFF) are ingested into a Bronze layer as Parquet, then refined into a Silver layer with computed fields (distances, zonal statistics). Each layer is stored as files on disk, mirroring how data would flow through a cloud object store (S3, GCS, ADLS) in a production data lake.
+
 ## Setup
 
-### Local Setup
-
-> 💡 If you don't manage to run the local setup or you have restrictions to install software in your laptop, use the [gitpod](#gitpod-setup) one
-
-#### Pre-requisites
-
-Please make sure you have the following installed and can run them
-
-- Python (3.11.X), you can use for example [pyenv](https://github.com/pyenv/pyenv#installation) to manage your python versions locally
-- [Poetry](https://python-poetry.org/docs/#installation)
-- Java (11), you can use [sdkman](https://sdkman.io/) to install and manage java locally
-
-#### Windows users
-
-We recommend using WSL 2 on Windows for this exercise, due to the [lack of support](https://cwiki.apache.org/confluence/display/HADOOP2/WindowsProblems) of windows paths from Hadoop/Spark.
-
-Follow instructions on the [Windows official page](https://learn.microsoft.com/en-us/windows/wsl/setup/environment)
-
-> 💡 In case of issues, like missing permissions on the machine, please use the [gitpod setup](#gitpod-setup)
-
-#### Install all dependencies
+### Build and run the Docker container
 
 ```bash
-poetry install
+docker build -t de-python .
+docker run -it --rm -v $(pwd):/app de-python bash
 ```
-
-### Gitpod setup
-
-Alternatively, you can setup the environment using
-
-[![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/techops-recsys-lateral-hiring/dataengineer-transformations-python)
-
-There's an initialize script setup that takes around 3 minutes to complete. Once you use paste this repository link in new Workspace, please wait until the packages are installed. After everything is setup, select Poetry's environment by clicking on thumbs up icon and navigate to Testing tab and hit refresh icon to discover tests.
-
-Note that you can use gitpod's web interface or setup [ssh to Gitpod](https://www.gitpod.io/docs/references/ides-and-editors/vscode#connecting-to-vs-code-desktop) so that you can use VS Code from local to remote to Gitpod
-
-Remember to stop the vm and restart it just before the interview.
 
 ### Verify setup
 
-> All of the following commands should be running successfully
+> Run these inside the container. All commands should complete successfully.
 
 #### Run unit tests
 
@@ -162,11 +133,10 @@ poetry build && poetry run spark-submit \
 
 This job takes bike trip information and computes the "as the crow flies" distance traveled for each trip using **Apache Sedona**.
 
-Distance is calculated using Sedona's `ST_Distance` with coordinate reprojection:
-1. Start and end coordinates (WGS84 / EPSG:4326) are converted to geometry points via `ST_Point`
-2. Points are reprojected to Web Mercator (EPSG:3857) via `ST_Transform`, giving distances in metres
-3. `ST_Distance` computes the straight-line distance between the two projected points
-4. Result is divided by 1609.344 to convert metres to miles
+Distance is calculated using Sedona's `ST_DistanceSphere`:
+1. Start and end coordinates are converted to geometry points via `ST_Point` (longitude, latitude)
+2. `ST_DistanceSphere` computes the great-circle distance between the two points in metres
+3. Result is divided by 1609.344 to convert metres to miles
 
 ##### Input
 
@@ -264,21 +234,14 @@ Reads the ingested raster Parquet and the `clip.gpkg` vector layer. For each zon
 | `pixel_min` | Minimum pixel value |
 | `pixel_max` | Maximum pixel value |
 
-```bash
-poetry run python jobs/raster_zonal_stats.py \
-    resources-out/raster_ingest \
-    resources/clip.gpkg \
-    resources-out/raster_zonal_stats
-```
-
 ### Run the full raster pipeline
 
 ```bash
 poetry run python jobs/convert_to_cog.py \
     resources/clipped_raster.tif \
-    resources/clipped_raster_cog.tif && \
+    resources-out/clipped_raster_cog.tif && \
 poetry run python jobs/raster_ingest.py \
-    resources/clipped_raster_cog.tif \
+    resources-out/clipped_raster_cog.tif \
     resources-out/raster_ingest && \
 poetry run python jobs/raster_zonal_stats.py \
     resources-out/raster_ingest \
@@ -294,13 +257,6 @@ If you are unfamiliar with some of the tools used here, we recommend some resour
 
 - **pytest**: [official](https://docs.pytest.org/en/8.2.x/getting-started.html#get-started)
 - **pyspark**: [official](https://spark.apache.org/docs/latest/api/python/index.html) and especially the [DataFrame quickstart](https://spark.apache.org/docs/latest/api/python/getting_started/quickstart_df.html)
-
-### Run Docker Container
-
-```bash
-docker build -t de-python .
-docker run -it --rm -v $(pwd):/app de-python bash
-```
 
 ### Test Sedona and Geotools
 
