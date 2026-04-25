@@ -194,6 +194,45 @@ flowchart TD
   Gpkg["fa:fa-file clip.gpkg"] --> J2
 ```
 
+```mermaid
+---
+title: Raster Ingest Class Diagram
+---
+classDiagram
+  class batch_ingest_rasters {
+    +StructType BINARY_FILE_SCHEMA
+    +load_raster_batch(spark: SparkSession, input_dir: str) DataFrame
+    +run(spark: SparkSession, input_dir: str, output_path: str, checkpoint_path: str) None
+  }
+
+  class raster_batch_ingest {
+    -str LOG_FILENAME
+    -str APP_NAME
+  }
+
+  class convert_to_cog {
+    +convert_to_cog(input_path: str, output_path: str) None
+  }
+
+  class SparkSession
+  class DataFrame
+  class SedonaContext
+  class rasterio
+
+  raster_batch_ingest ..> batch_ingest_rasters : uses
+  raster_batch_ingest ..> SedonaContext : creates
+  raster_batch_ingest ..> SparkSession : configures
+
+  batch_ingest_rasters ..> SedonaContext : creates
+  batch_ingest_rasters ..> SparkSession : reads_stream
+  batch_ingest_rasters ..> DataFrame : returns_stream
+
+  convert_to_cog ..> rasterio : uses
+
+  SedonaContext ..> SparkSession : wraps
+  SparkSession ..> DataFrame : creates
+```
+
 ### COG Conversion
 
 Converts the source GeoTIFF to a **Cloud Optimized GeoTIFF (COG)**. COGs reorganize the internal file structure into tiled blocks with embedded overviews, enabling Spark workers to fetch only the tiles they need via HTTP range requests when the file is stored in cloud object storage (S3, GCS, ADLS).
