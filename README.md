@@ -196,7 +196,7 @@ flowchart TD
 
 ```mermaid
 ---
-title: Raster Ingest Class Diagram
+title: Raster Spark Pipeline Architecture
 ---
 classDiagram
   class batch_ingest_rasters {
@@ -237,7 +237,7 @@ classDiagram
 
 Converts the source GeoTIFF to a **Cloud Optimized GeoTIFF (COG)**. COGs reorganize the internal file structure into tiled blocks with embedded overviews, enabling Spark workers to fetch only the tiles they need via HTTP range requests when the file is stored in cloud object storage (S3, GCS, ADLS).
 
-> COG conversion uses `rasterio` (backed by GDAL) — Spark/Sedona can read COGs but cannot write them.
+> COG conversion uses `rasterio` (backed by GDAL) — Spark/Sedona can read COGs but cannot write them. Rather than loading the entire raster into memory, data is read and written in block-sized windows to keep memory usage bounded regardless of raster size. Overviews are built on a temporary on-disk copy so the source file is never modified. Currently runs locally; for a distributed file system, the output path would need to use a GDAL VSI path (e.g. `/vsis3/bucket/...`) to write directly to cloud storage.
 
 The conversion:
 1. Opens the source GeoTIFF
