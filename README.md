@@ -4,6 +4,8 @@ This is a collection of _Python_ jobs that extract, transform and load data usin
 
 The pipelines follow a **data lake medallion architecture**: raw source files (CSV, GeoTIFF) are ingested into a Bronze layer as Parquet, then refined into a Silver layer with computed fields (distances, zonal statistics). Each layer is stored as files on disk, mirroring how data would flow through a cloud object store (S3, GCS, ADLS) in a production data lake.
 
+Raster ingestion uses **Spark Structured Streaming** with `trigger(availableNow=True)` and the `binaryFile` source — an open-source alternative to Databricks Autoloader (which requires the proprietary `cloudFiles` format). It scans a directory for new `.tif` files, processes only those not yet ingested (tracked via checkpoint), and exits when done. This makes it safe to re-run incrementally as new raster files arrive.
+
 ## Setup
 
 ### Build and run the Docker container
@@ -42,6 +44,14 @@ poetry run pylint data_transformations tests
 
 All commands are passing?  
 You are good to go!
+
+### Logs
+
+All jobs write logs to `project.log` in the working directory. To follow logs while a job is running:
+
+```bash
+tail -f project.log
+```
 
 ## Jobs
 
@@ -179,7 +189,7 @@ title: Raster Pipeline
 ---
 flowchart TD
   Tif["fa:fa-file clipped_raster.tif"] --> COG{{convert_to_cog.py}} --> CogTif["fa:fa-file clipped_raster_cog.tif"]
-  CogTif --> J1{{raster_ingest.py}} --> Bronze["fa:fa-table-columns raster.parquet"]
+  CogTif --> J1{{raster_batch_ingest.py}} --> Bronze["fa:fa-table-columns raster.parquet"]
   Bronze --> J2{{raster_zonal_stats.py}} --> Silver["fa:fa-table-columns zonal_stats.parquet"]
   Gpkg["fa:fa-file clip.gpkg"] --> J2
 ```
@@ -203,10 +213,13 @@ poetry run python jobs/convert_to_cog.py \
 
 ### Ingest
 
-Reads the GeoTIFF (or COG) and writes it as Parquet, extracting the following metadata:
+Reads a directory of GeoTIFF (or COG) files and writes them as Parquet, extracting the following metadata.
+
+> This job uses **Spark Structured Streaming** with `trigger(availableNow=True)`: it processes all unprocessed `.tif` files in the input directory and exits when done. A checkpoint tracks which files have already been ingested — re-running the job will only pick up files added since the last run.
 
 | Column | Description |
 |---|---|
+| `path` | Source file path |
 | `raster` | The raster object (Sedona GridCoverage2D) |
 | `width` | Number of pixels in the X direction |
 | `height` | Number of pixels in the Y direction |
@@ -215,9 +228,13 @@ Reads the GeoTIFF (or COG) and writes it as Parquet, extracting the following me
 | `envelope` | Bounding geometry in WGS84 |
 
 ```bash
-poetry run python jobs/raster_ingest.py \
-    resources/clipped_raster_cog.tif \
-    resources-out/raster_ingest
+poetry build && poetry run spark-submit \
+    --master local \
+    --py-files dist/data_transformations-*.whl \
+    jobs/raster_batch_ingest.py \
+    resources-out/cog/ \
+    resources-out/raster_batch \
+    resources-out/raster_batch_checkpoint
 ```
 
 ### Zonal Statistics
@@ -239,12 +256,18 @@ Reads the ingested raster Parquet and the `clip.gpkg` vector layer. For each zon
 ```bash
 poetry run python jobs/convert_to_cog.py \
     resources/clipped_raster.tif \
-    resources-out/clipped_raster_cog.tif && \
-poetry run python jobs/raster_ingest.py \
-    resources-out/clipped_raster_cog.tif \
-    resources-out/raster_ingest && \
+    resources-out/cog/clipped_raster_cog.tif && \
+
+poetry build && poetry run spark-submit \
+    --master local \
+    --py-files dist/data_transformations-*.whl \
+    jobs/raster_batch_ingest.py \
+    resources-out/cog/ \
+    resources-out/raster_batch \
+    resources-out/raster_batch_checkpoint && \
+
 poetry run python jobs/raster_zonal_stats.py \
-    resources-out/raster_ingest \
+    resources-out/raster_batch \
     resources/clip.gpkg \
     resources-out/raster_zonal_stats
 ```
