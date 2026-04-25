@@ -4,7 +4,6 @@ from pathlib import Path
 
 import rasterio
 from rasterio.enums import Resampling
-from rasterio.io import MemoryFile
 from rasterio.shutil import copy
 
 LOG_FILENAME = "project.log"
