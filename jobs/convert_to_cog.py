@@ -16,6 +16,7 @@ Example:
 
 import logging
 import sys
+from pathlib import Path
 
 import rasterio
 from rasterio.enums import Resampling
@@ -75,4 +76,5 @@ if __name__ == "__main__":
     input_tiff = sys.argv[1]
     output_cog = sys.argv[2]
 
+    Path(output_cog).parent.mkdir(parents=True, exist_ok=True)
     convert_to_cog(input_tiff, output_cog)
