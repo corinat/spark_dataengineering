@@ -89,5 +89,6 @@ requirements.txt
 output
 resources-out/
 .DS_Store
+.vscode/
 # batect
 .batect/caches/key

@@ -62,7 +62,7 @@ jobs:
 
       - name: Test Hadoop Setup
         run: |
-          winutils.exe chmod 777 D:\a\dataengineer-transformations-python\dataengineer-transformations-python
+          winutils.exe chmod 777 $pwd
       - name: Install Python Dependencies
         run: |
           poetry install

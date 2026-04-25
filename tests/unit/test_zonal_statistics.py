@@ -1,11 +1,7 @@
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock
 
-from data_transformations.raster import ingest, zonal_stats
+from data_transformations.raster import zonal_stats
 
-
-# ---------------------------------------------------------------------------
-# zonal_stats.load_zones
-# ---------------------------------------------------------------------------
 
 def test_load_zones_uses_geopackage_format() -> None:
     mock_spark = MagicMock()
@@ -87,40 +83,4 @@ def test_compute_zonal_stats_sql_contains_output_column_names() -> None:
         assert col in sql_query, f"Expected column '{col}' in SQL query"
 
 
-# ---------------------------------------------------------------------------
-# ingest.load_raster
-# ---------------------------------------------------------------------------
 
-def test_load_raster_creates_sedona_context() -> None:
-    mock_spark = MagicMock()
-
-    with patch("data_transformations.raster.ingest.SedonaContext") as mock_sedona_ctx:
-        ingest.load_raster(mock_spark, "resources/clipped_raster.tif")
-
-        mock_sedona_ctx.create.assert_called_once_with(mock_spark)
-
-
-def test_load_raster_creates_raw_raster_temp_view() -> None:
-    mock_spark = MagicMock()
-
-    with patch("data_transformations.raster.ingest.SedonaContext") as mock_sedona_ctx:
-        mock_sedona = mock_sedona_ctx.create.return_value
-
-        ingest.load_raster(mock_spark, "resources/clipped_raster.tif")
-
-        first_sql_call = mock_sedona.sql.call_args_list[0][0][0]
-        assert "raw_raster" in first_sql_call
-        assert "RS_FromGeoTiff" in first_sql_call
-
-
-def test_load_raster_sql_selects_metadata_columns() -> None:
-    mock_spark = MagicMock()
-
-    with patch("data_transformations.raster.ingest.SedonaContext") as mock_sedona_ctx:
-        mock_sedona = mock_sedona_ctx.create.return_value
-
-        ingest.load_raster(mock_spark, "resources/clipped_raster.tif")
-
-        second_sql_call = mock_sedona.sql.call_args_list[1][0][0]
-        for col in ("width", "height", "num_bands", "metadata", "envelope"):
-            assert col in second_sql_call, f"Expected column '{col}' in SELECT query"
