@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Iterator
 
 import numpy as np
 import pandas as pd
@@ -28,7 +29,7 @@ TILE_SCHEMA = StructType([
 ])
 
 
-def _extract_blocks(iterator):
+def _extract_blocks(iterator: Iterator[pd.DataFrame]) -> Iterator[pd.DataFrame]:
     """Open each COG file and yield one row per tile block.
 
     Called via mapInPandas — GDAL reads only the requested blocks from disk,
