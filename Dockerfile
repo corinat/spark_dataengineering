@@ -46,6 +46,9 @@ RUN echo 'eval "$(pyenv init -)"' >> /home/myuser/.bashrc
 # install python version using pyenv
 RUN pyenv install 3.11.4 && pyenv global 3.11.4
 
+# upgrade pip to latest version
+RUN pip install --upgrade pip
+
 # install poetry under the non-root user
 RUN curl -sSL https://install.python-poetry.org | python3 -
 

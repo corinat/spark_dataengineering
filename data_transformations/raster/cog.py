@@ -41,6 +41,7 @@ def convert_to_cog(input_path: str, output_path: str) -> None:
             src.count,
         )
         profile = src.profile.copy()
+        profile.update(nodata=0)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir) / "tmp_overviews.tif"

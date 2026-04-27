@@ -1,7 +1,7 @@
 import logging
 
+from pyspark.sql import DataFrame, SparkSession
 from sedona.spark import SedonaContext
-from pyspark.sql import SparkSession, DataFrame
 
 
 def load_zones(spark: SparkSession, vector_path: str, table_name: str = "clip") -> DataFrame:
@@ -74,5 +74,5 @@ def run(spark: SparkSession, raster_parquet_path: str, vector_path: str, output_
     result = compute_zonal_stats(sedona, raster_df, zones_df)
     result.show(truncate=False)
 
-    result.write.parquet(output_path)
+    result.write.format("geoparquet").save(output_path)
     logging.info("Zonal statistics written to: %s", output_path)
