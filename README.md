@@ -40,6 +40,20 @@ poetry run mypy --ignore-missing-imports --disallow-untyped-calls --disallow-unt
 poetry run pylint data_transformations tests
 ```
 
+### Test Sedona and Geotools
+
+Verify that Sedona vector functions and the geotools-wrapper JAR are working correctly:
+
+```bash
+# Verifies Sedona vector functions (ST_Point)
+poetry run python tests/test_sedona.py
+
+# Verifies Sedona raster functions + geotools-wrapper (RS_FromGeoTiff, RS_ZonalStats, etc.)
+poetry run python tests/test_geotools.py
+```
+
+Both scripts are also run automatically during `docker build` to validate the image.
+
 ### Anything else?
 
 All commands are passing?  
@@ -247,7 +261,7 @@ The conversion:
 ```bash
 poetry run python jobs/convert_to_cog.py \
     resources/clipped_raster.tif \
-    resources/clipped_raster_cog.tif
+    resources-out/cog/clipped_raster_cog.tif
 ```
 
 ### Ingest
@@ -276,9 +290,39 @@ poetry build && poetry run spark-submit \
     resources-out/raster_batch_checkpoint
 ```
 
+#### Memory-efficient alternative: COG block ingestion
+
+If you are processing large rasters and encounter memory pressure (Spark executor OOM, or the full raster binary exceeding the Parquet row size limit), `data_transformations/raster/process_raster_memory_improved.py` provides an alternative ingestion strategy.
+
+Instead of loading the full raster as a Sedona `GridCoverage2D` object, it drops the binary `content` immediately and uses a `mapInPandas` function to open each file with `rasterio` and yield **one row per COG tile block**. GDAL only reads the blocks it needs from disk, keeping memory usage bounded regardless of raster size.
+
+**How GDAL reads COG blocks efficiently on local and distributed file systems**
+
+A COG stores a tile index at the start of the file. When `rasterio` opens a file and calls `src.block_windows(1)`, GDAL reads that index first, then issues a separate **HTTP range request** for each block it needs — fetching only the bytes for that tile rather than streaming the full file. On a local disk, the same principle applies via byte-offset seeks. This means:
+
+- Each Spark executor reads only the tile blocks assigned to it
+- Memory per task is bounded to one block (e.g. 512×512 × num_bands × dtype size)
+- On cloud storage (S3, GCS, ADLS), files are accessed via GDAL's VSI layer (`/vsis3/`, `/vsigs/`, `/vsiaz/`) which translates block reads into `GET` requests with `Range` headers — no full file download occurs
+
+> To use this with cloud storage, pass a VSI path as `input_dir`, e.g. `s3://my-bucket/rasters/`. GDAL must be configured with the appropriate credentials (environment variables or instance role).
+
+> **Caveat:** because the `raster` column is never produced, downstream Sedona functions such as `RS_ZonalStats`, `RS_BandAsArray`, and `RS_Envelope` are not available. Per-block statistics (mean, min, max, NaN count) must be computed with numpy inside the UDF. This approach is suited to pixel-level analytics but **cannot feed into the Zonal Statistics job**.
+
+| Column | Description |
+|---|---|
+| `path` | Source file path |
+| `block_x` | Pixel column offset of the block |
+| `block_y` | Pixel row offset of the block |
+| `width` | Block width in pixels |
+| `height` | Block height in pixels |
+| `num_bands` | Number of raster bands |
+| `mean_value` | Mean pixel value across all bands for this block |
+
 ### Zonal Statistics
 
 Reads the ingested raster Parquet and the `clip.gpkg` vector layer. For each zone polygon, computes the following statistics for **band 1** using Sedona's `RS_ZonalStats` (nodata pixels excluded):
+
+> `zone_geometry` is stored using the **GeoParquet** standard — ISO WKB binary with a `geo` metadata block in the Parquet footer declaring the geometry column and CRS. This means standard tools (`geopandas`, DuckDB, QGIS) can read the file directly without a Spark/Sedona session, while keeping the geometry compact.
 
 | Column | Description |
 |---|---|
@@ -289,6 +333,7 @@ Reads the ingested raster Parquet and the `clip.gpkg` vector layer. For each zon
 | `pixel_stddev` | Standard deviation of pixel values |
 | `pixel_min` | Minimum pixel value |
 | `pixel_max` | Maximum pixel value |
+
 
 ### Run the full raster pipeline
 
@@ -311,6 +356,44 @@ poetry run python jobs/raster_zonal_stats.py \
     resources-out/raster_zonal_stats
 ```
 
+### Visualize raster from Parquet
+
+> This is an optional utility, not a required pipeline step.
+
+Reads the ingested raster Parquet and writes the raster back to a GeoTIFF file using Sedona's `RS_AsGeoTiff`. The output is a fully georeferenced TIF preserving the original CRS, geotransform, and all bands.
+
+```bash
+poetry run python jobs/visualize_raster_band.py \
+    resources-out/raster_batch \
+    resources-out/raster_restored.tif
+```
+
+### Visualize zonal statistics as GeoPackage
+
+> This is an optional utility, not a required pipeline step.
+
+Reads the zonal statistics GeoParquet and exports it as a GeoPackage for use in GIS tools such as QGIS. The output contains a `zonal_stats` layer with zone geometries and all computed statistics.
+
+```bash
+poetry run python jobs/visualize_zonal_stats.py \
+    resources-out/raster_zonal_stats \
+    resources-out/zonal_stats.gpkg
+```
+
+---
+
+## Future Improvements
+
+These are not needed at the current scale (one raster, one clip polygon) but would be the right additions if the pipeline were to grow.
+
+### Spatial indexing at scale
+
+| Scenario | Recommendation |
+|---|---|
+| Thousands of zone polygons in the GeoParquet output | Add an **H3** cell ID column (Uber's hexagonal grid) on the zone centroid, sort the Parquet by it. Enables cheap partition pruning on spatial range queries in DuckDB, pandas, and Spark without a database |
+| Large-scale spatial joins (many rasters × many zones) | Use Sedona's built-in **KDB-tree** or **Quad-tree** spatial partitioning to co-locate geometries that overlap before the join, avoiding a full cross-join |
+| COG files on cloud storage | Already handled — the COG internal tile index is effectively an R-tree that GDAL uses to resolve block reads via HTTP range requests |
+
 ---
 
 ## Reading List
@@ -319,17 +402,4 @@ If you are unfamiliar with some of the tools used here, we recommend some resour
 
 - **pytest**: [official](https://docs.pytest.org/en/8.2.x/getting-started.html#get-started)
 - **pyspark**: [official](https://spark.apache.org/docs/latest/api/python/index.html) and especially the [DataFrame quickstart](https://spark.apache.org/docs/latest/api/python/getting_started/quickstart_df.html)
-
-### Test Sedona and Geotools
-
-Verify that Sedona vector functions and the geotools-wrapper JAR are working correctly:
-
-```bash
-# Verifies Sedona vector functions (ST_Point)
-poetry run python tests/test_sedona.py
-
-# Verifies Sedona raster functions + geotools-wrapper (RS_FromGeoTiff, RS_ZonalStats, etc.)
-poetry run python tests/test_geotools.py
-```
-
-Both scripts are also run automatically during `docker build` to validate the image.
+- **Apache Sedona**: [official docs](https://sedona.apache.org/latest/), [raster functions reference](https://sedona.apache.org/latest/api/sql/Raster-operators/), [vector functions reference](https://sedona.apache.org/latest/api/sql/Vector-functions/)
