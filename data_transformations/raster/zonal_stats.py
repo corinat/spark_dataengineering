@@ -1,7 +1,9 @@
 import logging
 
+import geopandas as gpd
+from pyspark.sql import DataFrame, SparkSession
 from sedona.spark import SedonaContext
-from pyspark.sql import SparkSession, DataFrame
+from shapely import wkb
 
 
 def load_zones(spark: SparkSession, vector_path: str, table_name: str = "clip") -> DataFrame:
@@ -40,7 +42,7 @@ def compute_zonal_stats(spark: SparkSession, raster_df: DataFrame, zones_df: Dat
 
     return spark.sql("""
         SELECT
-            z.geometry                                              AS zone_geometry,
+            ST_AsBinary(z.geometry)                                 AS zone_geometry,
             RS_ZonalStats(r.raster, z.geometry, 1, 'count', true)  AS pixel_count,
             RS_ZonalStats(r.raster, z.geometry, 1, 'sum',   true)  AS pixel_sum,
             RS_ZonalStats(r.raster, z.geometry, 1, 'mean',  true)  AS pixel_mean,
@@ -74,5 +76,14 @@ def run(spark: SparkSession, raster_parquet_path: str, vector_path: str, output_
     result = compute_zonal_stats(sedona, raster_df, zones_df)
     result.show(truncate=False)
 
-    result.write.parquet(output_path)
+    from pathlib import Path
+    pdf = result.toPandas()
+    gdf = gpd.GeoDataFrame(
+        pdf.drop(columns=["zone_geometry"]),
+        geometry=pdf["zone_geometry"].apply(wkb.loads),
+        crs="EPSG:4326",
+    )
+    output_file = Path(output_path) / "part-0.parquet"
+    Path(output_path).mkdir(parents=True, exist_ok=True)
+    gdf.to_parquet(output_file)
     logging.info("Zonal statistics written to: %s", output_path)
